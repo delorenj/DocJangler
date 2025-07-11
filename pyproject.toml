@@ -27,6 +27,8 @@ dependencies = [
   "typer",
   "types-beautifulsoup4",
   "types-Pillow",
+  "llama-index",
+  "qdrant-client",
 ]
 
 [build-system]

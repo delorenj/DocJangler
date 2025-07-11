@@ -48,7 +48,34 @@ Set the `OPENAI_API_KEY` environment variable using
 export OPENAI_API_KEY=sk-***
 ```
 
-**OR** set in the `.env` file
+**OR** set in the `.env` file. Make sure to uncomment it.
+
+### 2.1. Setup Qdrant (for Document Embedding Tool)
+
+The document embedding tool requires a running Qdrant vector database instance.
+
+**Run Qdrant using Docker:**
+
+```sh
+docker run -p 6333:6333 -p 6334:6334 \
+    -v $(pwd)/qdrant_storage:/qdrant/storage \
+    qdrant/qdrant
+```
+This command mounts a local directory `./qdrant_storage` for persistence. Create this directory if it doesn't exist.
+Qdrant will be accessible at `http://localhost:6333`.
+
+**Configure Qdrant in `.env` file:**
+
+Ensure the following variables are set in your `.env` file (copy from `example.env` if needed and uncomment/edit):
+
+```env
+# --- Qdrant Configuration (for DocEmbedTool) ---
+QDRANT_URL="http://localhost:6333"
+QDRANT_API_KEY="" # Set if your Qdrant instance requires an API key
+QDRANT_DEFAULT_COLLECTION_NAME="default_repo_docs"
+```
+
+If you are running the integration tests, they are configured to use `QDRANT_URL="http://localhost:6334"` by default to avoid conflicts with a development instance on port 6333. You can start a separate Qdrant instance for tests on port 6334 or override `TEST_QDRANT_URL` environment variable.
 
 3. Start the workspace using:
 
@@ -58,6 +85,49 @@ phi ws up
 
 - Open [localhost:8501](http://localhost:8501) to view the Streamlit App.
 - Open [localhost:8000/docs](http://localhost:8000/docs) to view the FastAPI docs.
+
+### Using the Document Embedding API
+
+Once the application and Qdrant are running, you can use the new document embedding tool via its API endpoint.
+
+**Endpoint:** `POST /api/v1/embed-documentation`
+
+**Request Body (JSON):**
+
+```json
+{
+  "query": "Your technical search query",
+  "collection_name": "optional_custom_collection_name"
+}
+```
+
+- `query` (string, required): The search term for the documentation you want to find and embed.
+- `collection_name` (string, optional): The name of the Qdrant collection to store the embeddings in. If not provided, uses the default collection name configured in `QDRANT_DEFAULT_COLLECTION_NAME` (e.g., `default_repo_docs`).
+
+**Example using `curl`:**
+
+```sh
+curl -X POST "http://localhost:8000/api/v1/embed-documentation" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "query": "FastAPI background tasks",
+           "collection_name": "fastapi_specific_docs"
+         }'
+```
+
+**Successful Response (Example):**
+
+```json
+{
+  "processed_source_documents": 1,
+  "embedded_nodes": 15,
+  "collection_name": "fastapi_specific_docs",
+  "status": "Success",
+  "message": null
+}
+```
+
+If the tool encounters an issue (e.g., no search results found, unable to fetch webpage), the `status` field will indicate the problem, and `processed_source_documents` or `embedded_nodes` might be 0.
 
 4. Stop the workspace using:
 
