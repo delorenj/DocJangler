@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Annotated, Optional
+from typing import Optional
 
 import httpx
 import typer
@@ -30,11 +30,9 @@ class Colors:
 typer_app = typer.Typer()
 
 
-SettingsDep = Annotated[Settings, typer.Depends(get_settings)]
-
-
 @typer_app.command()
-def main(url: str, objective: str, settings: SettingsDep) -> None:
+def main(url: str, objective: str) -> None:
+    settings: Settings = get_settings()
     try:
         firecrawl_app: FirecrawlApp = get_firecrawl_app(settings)
     except RuntimeError as exc:
