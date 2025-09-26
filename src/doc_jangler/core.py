@@ -93,6 +93,47 @@ class ObjectiveFinder:
 
         return None
 
+    def extract_metadata_from_pages(
+        self,
+        pages: Sequence[str],
+        objective: str,
+        *,
+        limit: Optional[int] = None,
+        progress: Optional[ProgressCallback] = None,
+    ) -> List[ObjectiveResult]:
+        """Collect objective-aligned metadata for each provided page."""
+
+        selected_pages = list(pages)
+        if limit is not None:
+            selected_pages = selected_pages[:limit]
+
+        results: List[ObjectiveResult] = []
+
+        for link in selected_pages:
+            if progress:
+                progress("scrape", link)
+            scrape_result = self._firecrawl_app.scrape(url=link)
+            completion = self._analyse_scraped_content(objective, scrape_result.markdown)
+            if progress:
+                progress("model_response", completion)
+            try:
+                parsed = self._extract_structured_data(completion)
+            except ValueError:
+                if progress:
+                    progress("parse_error", completion)
+                continue
+
+            if parsed is None:
+                if progress:
+                    progress("objective_not_met", link)
+                continue
+
+            if progress:
+                progress("objective_met", link)
+            results.append(ObjectiveResult(source_url=link, data=parsed))
+
+        return results
+
     def _suggest_search_parameter(self, objective: str) -> str:
         map_prompt = (
             "The map function generates a list of URLs from a website and it accepts "
