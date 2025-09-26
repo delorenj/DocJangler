@@ -18,6 +18,13 @@ dependencies = [
     "typer>=0.19.2",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=5.0",
+    "respx>=0.20",
+]
+
 [project.scripts]
 doc-jangler = "doc_jangler:main"
 

@@ -60,54 +60,19 @@ class ObjectiveFinder:
         links = [link.url for link in getattr(map_response, "links", []) if getattr(link, "url", None)]
         return MappingResult(search_parameter=search_parameter, links=links)
 
-    def find_objective_in_pages(
-        self,
-        pages: Sequence[str],
-        objective: str,
-        *,
-        limit: int = 3,
-        progress: Optional[ProgressCallback] = None,
-    ) -> Optional[ObjectiveResult]:
-        """Attempt to fulfil the objective by analysing the provided pages."""
-
-        for link in list(pages)[:limit]:
-            if progress:
-                progress("scrape", link)
-            scrape_result = self._firecrawl_app.scrape(url=link)
-            completion = self._analyse_scraped_content(objective, scrape_result.markdown)
-            if progress:
-                progress("model_response", completion)
-            try:
-                parsed = self._extract_structured_data(completion)
-            except ValueError:
-                if progress:
-                    progress("parse_error", completion)
-                continue
-
-            if parsed is not None:
-                if progress:
-                    progress("objective_met", link)
-                return ObjectiveResult(source_url=link, data=parsed)
-            if progress:
-                progress("objective_not_met", link)
-
-        return None
-
-    def extract_metadata_from_pages(
+    def _process_pages(
         self,
         pages: Sequence[str],
         objective: str,
         *,
         limit: Optional[int] = None,
         progress: Optional[ProgressCallback] = None,
-    ) -> List[ObjectiveResult]:
-        """Collect objective-aligned metadata for each provided page."""
+    ) -> Iterable[ObjectiveResult]:
+        """Scrape and analyse pages, yielding results as they are found."""
 
         selected_pages = list(pages)
         if limit is not None:
             selected_pages = selected_pages[:limit]
-
-        results: List[ObjectiveResult] = []
 
         for link in selected_pages:
             if progress:
@@ -130,9 +95,34 @@ class ObjectiveFinder:
 
             if progress:
                 progress("objective_met", link)
-            results.append(ObjectiveResult(source_url=link, data=parsed))
+            yield ObjectiveResult(source_url=link, data=parsed)
 
-        return results
+    def find_objective_in_pages(
+        self,
+        pages: Sequence[str],
+        objective: str,
+        *,
+        limit: int = 3,
+        progress: Optional[ProgressCallback] = None,
+    ) -> Optional[ObjectiveResult]:
+        """Attempt to fulfil the objective by analysing the provided pages."""
+
+        return next(
+            self._process_pages(pages, objective, limit=limit, progress=progress),
+            None,
+        )
+
+    def extract_metadata_from_pages(
+        self,
+        pages: Sequence[str],
+        objective: str,
+        *,
+        limit: Optional[int] = None,
+        progress: Optional[ProgressCallback] = None,
+    ) -> List[ObjectiveResult]:
+        """Collect objective-aligned metadata for each provided page."""
+
+        return list(self._process_pages(pages, objective, limit=limit, progress=progress))
 
     def _suggest_search_parameter(self, objective: str) -> str:
         map_prompt = (

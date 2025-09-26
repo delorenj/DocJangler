@@ -43,45 +43,35 @@ class DocJanglerTools:
 
         try:
             firecrawl_app, settings = self._resolve_dependencies()
-        except RuntimeError as exc:
-            return {"status": "error", "message": str(exc)}
-
-        finder = ObjectiveFinder(firecrawl_app=firecrawl_app, settings=settings)
-
-        try:
+            finder = ObjectiveFinder(firecrawl_app=firecrawl_app, settings=settings)
             finder.ensure_model_available()
             mapping: MappingResult = finder.find_relevant_pages(objective, url)
-        except (MissingConfigurationError, ObjectiveFinderError) as exc:
-            return {"status": "error", "message": str(exc)}
-        except httpx.HTTPError as exc:
-            return {"status": "error", "message": f"HTTP error: {exc}"}
-        except Exception as exc:  # noqa: BLE001
-            return {"status": "error", "message": f"Unexpected error: {exc}"}
 
-        if not mapping.links:
-            return {"status": "error", "message": "No relevant pages found."}
+            if not mapping.links:
+                return {"status": "error", "message": "No relevant pages found."}
 
-        try:
             result: Optional[ObjectiveResult] = finder.find_objective_in_pages(
                 mapping.links,
                 objective,
                 limit=3,
             )
+
+            if not result:
+                return {"status": "error", "message": "Objective could not be fulfilled."}
+
+            return {
+                "status": "success",
+                "source_url": result.source_url,
+                "data": result.data,
+            }
+        except RuntimeError as exc:
+            return {"status": "error", "message": str(exc)}
         except (MissingConfigurationError, ObjectiveFinderError) as exc:
             return {"status": "error", "message": str(exc)}
         except httpx.HTTPError as exc:
             return {"status": "error", "message": f"HTTP error: {exc}"}
         except Exception as exc:  # noqa: BLE001
             return {"status": "error", "message": f"Unexpected error: {exc}"}
-
-        if not result:
-            return {"status": "error", "message": "Objective could not be fulfilled."}
-
-        return {
-            "status": "success",
-            "source_url": result.source_url,
-            "data": result.data,
-        }
 
 
 __all__ = ["DocJanglerTools"]

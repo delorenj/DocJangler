@@ -249,39 +249,6 @@ def generate_doc_link_metadata(
     typer.echo(json.dumps(payload, indent=2))
 
 
-@ingest_app.command("scrape-links")
-def scrape_doc_links(
-    topic: str = typer.Argument(..., help="Topic used when scraping the links."),
-    links: List[str] = typer.Argument(..., metavar="LINKS...", help="Links to scrape."),
-    limit: int = typer.Option(3, "--limit", min=1, help="Maximum links to inspect."),
-    show_progress: bool = typer.Option(True, "--progress/--no-progress", help="Toggle verbose crawl output."),
-) -> None:
-    """Scrape links until the objective is met and return the first match."""
-
-    if not links:
-        _echo("At least one link must be provided.", Colors.RED)
-        raise typer.Exit(code=1)
-
-    finder = _build_finder()
-    _ensure_model_ready(finder)
-
-    results = _safe_extract_metadata(
-        finder,
-        links,
-        topic,
-        limit=limit,
-        show_progress=show_progress,
-    )
-
-    if not results:
-        _echo("Objective could not be fulfilled for the supplied links.", Colors.RED)
-        raise typer.Exit(code=1)
-
-    first = results[0]
-    payload = {"source_url": first.source_url, "data": first.data}
-    typer.echo(json.dumps(payload, indent=2))
-
-
 @ingest_app.command("find-example-code")
 def find_and_scrape_example_code() -> None:
     """Placeholder for future example-code scraping implementation."""
