@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
-from typing import List, Optional, Sequence
+import uuid
+from typing import Callable, List, Optional, Sequence
 
 import httpx
+import redis
 import typer
 
-from .config import get_firecrawl_app, get_settings
+from .config import Settings, get_firecrawl_app, get_settings
 from .core import (
     MappingResult,
     MissingConfigurationError,
@@ -14,6 +16,8 @@ from .core import (
     ObjectiveFinderError,
     ObjectiveResult,
 )
+from .document_pipeline import DocumentationIngestor
+from .embeddings import OllamaEmbedder, OllamaEmbeddingError
 
 
 class Colors:
@@ -35,14 +39,31 @@ def _echo(message: str, color: str) -> None:
     typer.echo(f"{color}{message}{Colors.RESET}")
 
 
-def _build_finder() -> ObjectiveFinder:
-    settings = get_settings()
+def _build_finder(settings: Optional[Settings] = None) -> ObjectiveFinder:
+    settings = settings or get_settings()
     try:
         firecrawl_app = get_firecrawl_app(settings)
     except RuntimeError as exc:  # Raised when FIRECRAWL_API_KEY is missing.
         _echo(str(exc), Colors.RED)
         raise typer.Exit(code=1) from exc
     return ObjectiveFinder(firecrawl_app=firecrawl_app, settings=settings)
+
+
+def _build_embedder(settings: Settings) -> OllamaEmbedder:
+    return OllamaEmbedder(
+        base_url=settings.ollama_base_url,
+        model=settings.ollama_embedding_model,
+    )
+
+
+def _connect_redis(url: str):
+    try:
+        client = redis.from_url(url)
+        client.ping()
+    except redis.RedisError as exc:
+        _echo(f"Redis connection error: {exc}", Colors.RED)
+        raise typer.Exit(code=1) from exc
+    return client
 
 
 def _ensure_model_ready(finder: ObjectiveFinder) -> None:
@@ -78,9 +99,16 @@ def _progress_reporter(show_output: bool):
     return report
 
 
-def _safe_find_relevant_pages(finder: ObjectiveFinder, objective: str, site: str) -> MappingResult:
+def _safe_find_relevant_pages(
+    finder: ObjectiveFinder,
+    objective: str,
+    site: str,
+    *,
+    topic_hint: Optional[str] = None,
+    debug: Optional[Callable[[str], None]] = None,
+) -> MappingResult:
     try:
-        return finder.find_relevant_pages(objective, site)
+        return finder.find_relevant_pages(objective, site, topic=topic_hint, debug=debug)
     except (ObjectiveFinderError, MissingConfigurationError) as exc:
         _echo(str(exc), Colors.RED)
         raise typer.Exit(code=1) from exc
@@ -119,55 +147,58 @@ def _safe_extract_metadata(
 def jangle_docs(
     topic: str = typer.Argument(..., help="Topic to explore."),
     site: str = typer.Option(..., "--site", help="Base site to inspect."),
-    objective: Optional[str] = typer.Option(None, "--objective", help="Explicit objective to satisfy."),
-    limit: int = typer.Option(3, "--limit", min=1, help="Maximum pages to inspect."),
-    show_progress: bool = typer.Option(True, "--progress/--no-progress", help="Toggle verbose crawl output."),
-    include_all: bool = typer.Option(False, "--all-results", help="Return metadata for every matching page."),
+    objective: Optional[str] = typer.Option(None, "--objective", help="Deprecated; retained for compatibility."),
+    chunk_size: int = typer.Option(1200, "--chunk-size", min=200, help="Maximum characters per chunk."),
+    chunk_overlap: int = typer.Option(200, "--chunk-overlap", min=0, help="Character overlap between chunks."),
+    redis_url: Optional[str] = typer.Option(None, "--redis-url", help="Redis connection URL."),
+    batch_id: Optional[str] = typer.Option(None, "--batch-id", help="Optional batch identifier."),
+    debug: bool = typer.Option(False, "--debug/--no-debug", help="Print detailed crawl diagnostics."),
 ) -> None:
-    """Top level command for orchestrating a documentation scrape run."""
+    """Collect, chunk, embed, and persist documentation for the site."""
 
-    finder = _build_finder()
-    _ensure_model_ready(finder)
+    settings = get_settings()
+    finder = _build_finder(settings)
+    debug_logger = _debug_logger(debug)
+    embedder = _build_embedder(settings)
 
-    search_objective = objective or topic
+    _echo("Initiating documentation ingestion...", Colors.YELLOW)
+    _echo(f"Target topic: {topic}", Colors.CYAN)
+    _echo(f"Target site: {site}", Colors.CYAN)
 
-    _echo("Initiating web crawling process...", Colors.YELLOW)
-    _echo(f"Understood. Objective: {search_objective}", Colors.CYAN)
-    _echo(f"Searching website: {site}", Colors.CYAN)
+    redis_client = _connect_redis(redis_url or settings.redis_url)
+    batch_identifier = batch_id or str(uuid.uuid4())
 
-    mapping = _safe_find_relevant_pages(finder, search_objective, site)
-
-    if not mapping.links:
-        _echo("No relevant pages found. Exiting...", Colors.RED)
-        raise typer.Exit(code=0)
-
-    if mapping.search_parameter:
-        _echo(f"Optimal search parameter identified: {mapping.search_parameter}", Colors.GREEN)
-    _echo("Website mapping completed successfully.", Colors.GREEN)
-
-    results = _safe_extract_metadata(
+    ingestor = DocumentationIngestor(
         finder,
-        mapping.links,
-        search_objective,
-        limit=limit,
-        show_progress=show_progress,
+        redis_client,
+        embedder=embedder,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
     )
 
-    if not results:
-        _echo("Objective could not be fulfilled.", Colors.RED)
+    try:
+        summary = ingestor.ingest(
+            site,
+            topic,
+            batch_id=batch_identifier,
+            debug=debug_logger,
+        )
+    except OllamaEmbeddingError as exc:
+        _echo(f"Embedding generation failed: {exc}", Colors.RED)
+        raise typer.Exit(code=1) from exc
+
+    if summary["chunk_count"] == 0:
+        _echo("No content was ingested; verify the target site contains documentation.", Colors.RED)
         raise typer.Exit(code=1)
 
-    _echo("Objective successfully found! Extracted information:", Colors.GREEN)
-
-    selected = results if include_all else results[:1]
-    payload = [
-        {
-            "source_url": result.source_url,
-            "data": result.data,
-        }
-        for result in selected
-    ]
-    typer.echo(json.dumps(payload if include_all else payload[0], indent=2))
+    _echo(
+        (
+            f"Stored {summary['chunk_count']} chunks from {summary['link_count']} pages "
+            f"into Redis batch {batch_identifier}."
+        ),
+        Colors.GREEN,
+    )
+    typer.echo(json.dumps(summary, indent=2))
 
 
 @ingest_app.command("find-domains")
@@ -192,22 +223,24 @@ def find_doc_links(
     topic: str = typer.Argument(..., help="Topic to map inside the domain."),
     domain: str = typer.Option(..., "--domain", help="Documentation domain to inspect."),
     max_links: int = typer.Option(10, "--max-links", min=1, help="Limit number of links returned."),
+    debug: bool = typer.Option(False, "--debug/--no-debug", help="Print detailed crawl diagnostics."),
 ) -> None:
     """Return candidate documentation links within a domain for the given topic."""
 
     finder = _build_finder()
     _ensure_model_ready(finder)
 
-    mapping = _safe_find_relevant_pages(finder, topic, domain)
+    links = finder.collect_document_links(
+        domain,
+        topic=topic,
+        debug=_debug_logger(debug),
+    )
 
-    if not mapping.links:
+    if not links:
         _echo("No relevant links found.", Colors.RED)
         raise typer.Exit(code=1)
 
-    payload = {
-        "search_parameter": mapping.search_parameter,
-        "links": mapping.links[:max_links],
-    }
+    payload = {"links": links[:max_links]}
     typer.echo(json.dumps(payload, indent=2))
 
 
@@ -289,3 +322,11 @@ def main() -> None:
 
 
 __all__ = ["typer_app", "main"]
+def _debug_logger(enabled: bool):
+    if not enabled:
+        return None
+
+    def log(message: str) -> None:
+        _echo(message, Colors.MAGENTA)
+
+    return log

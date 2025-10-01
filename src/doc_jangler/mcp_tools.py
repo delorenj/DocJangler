@@ -45,7 +45,7 @@ class DocJanglerTools:
             firecrawl_app, settings = self._resolve_dependencies()
             finder = ObjectiveFinder(firecrawl_app=firecrawl_app, settings=settings)
             finder.ensure_model_available()
-            mapping: MappingResult = finder.find_relevant_pages(objective, url)
+            mapping: MappingResult = finder.find_relevant_pages(objective, url, topic=objective)
 
             if not mapping.links:
                 return {"status": "error", "message": "No relevant pages found."}

@@ -23,7 +23,14 @@ class SuccessFinder:
     def ensure_model_available(self) -> None:  # pragma: no cover - nothing to do
         return None
 
-    def find_relevant_pages(self, objective: str, url: str) -> MappingResult:
+    def find_relevant_pages(
+        self,
+        objective: str,
+        url: str,
+        *,
+        topic: str | None = None,
+        debug=None,
+    ) -> MappingResult:
         return self._mapping
 
     def find_objective_in_pages(self, pages, objective, *, limit=3):
@@ -31,7 +38,14 @@ class SuccessFinder:
 
 
 class EmptyFinder(SuccessFinder):
-    def find_relevant_pages(self, objective: str, url: str) -> MappingResult:
+    def find_relevant_pages(
+        self,
+        objective: str,
+        url: str,
+        *,
+        topic: str | None = None,
+        debug=None,
+    ) -> MappingResult:
         return MappingResult(search_parameter="docs", links=[])
 
 
@@ -47,6 +61,9 @@ def _make_tools() -> mcp_tools.DocJanglerTools:
         firecrawl_api_url="https://firecrawl.example.com",
         openrouter_endpoint="https://openrouter.example.com",
         openrouter_model="fake-model",
+        redis_url="redis://localhost:6379/0",
+        ollama_base_url="http://localhost:11434",
+        ollama_embedding_model="nomic-embed-text",
     )
     return mcp_tools.DocJanglerTools(settings=settings, firecrawl_app=SimpleNamespace())
 

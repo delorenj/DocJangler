@@ -21,6 +21,9 @@ class Settings:
     firecrawl_api_url: str
     openrouter_endpoint: str
     openrouter_model: str
+    redis_url: str
+    ollama_base_url: str
+    ollama_embedding_model: str
 
 
 @lru_cache(maxsize=1)
@@ -35,6 +38,9 @@ def get_settings() -> Settings:
             "OPENROUTER_ENDPOINT", "https://openrouter.ai/api/v1/chat/completions"
         ),
         openrouter_model=os.getenv("DOCJANGLER_MODEL", "moonshotai/kimi-k2"),
+        redis_url=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+        ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+        ollama_embedding_model=os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text"),
     )
 
 

@@ -147,6 +147,9 @@ def fake_settings() -> Settings:
         firecrawl_api_url="https://firecrawl.example.com",
         openrouter_endpoint="https://openrouter.example.com",
         openrouter_model="fake-model",
+        redis_url="redis://localhost:6379/0",
+        ollama_base_url="http://localhost:11434",
+        ollama_embedding_model="nomic-embed-text",
     )
 
 
